@@ -40,7 +40,8 @@ fun game(
     ratingsCount: Int = 1_000,
     released: String? = "2020-01-01",
     playtime: Int = 20,
-    name: String = "Game $id",
+    // No space before the number: "Game 1" and "Game 2" would otherwise share the franchise "game".
+    name: String = "Game$id",
 ) = Game(
     id = id,
     slug = "game-$id",

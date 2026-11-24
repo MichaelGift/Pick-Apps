@@ -46,7 +46,7 @@ class CandidateSource @Inject constructor(private val games: GameRepository) {
                     }
                     val byTags = async {
                         val tags = seed.tags.take(SEED_TAGS).map { it.id }.toSet()
-                        if (tags.isEmpty()) Result.success(emptyList()) else games.games(base.copy(tagIds = tags, ordering = GameQuery.Ordering.POPULAR)).map { it.items }
+                        if (tags.isEmpty()) Result.success(emptyList()) else games.games(base.copy(tagIds = tags, ordering = GameQuery.Ordering.RATING, metacritic = WELL_REVIEWED)).map { it.items }
                     }
                     listOf(series.await(), byDeveloper.await(), byTags.await())
                 }
@@ -55,8 +55,8 @@ class CandidateSource @Inject constructor(private val games: GameRepository) {
         val topGenres = profile.top(TOP_FEATURES) { it.kind == GameFeature.Kind.GENRE }.map { it.id }.toSet()
         val topTags = profile.top(TOP_FEATURES) { it.kind == GameFeature.Kind.TAG }.map { it.id }.toSet()
         val discovery = listOfNotNull(
-            topGenres.takeIf { it.isNotEmpty() }?.let { async { games.games(base.copy(genreIds = it, ordering = GameQuery.Ordering.RATING, pageSize = 40)).map { p -> p.items } } },
-            topTags.takeIf { it.isNotEmpty() }?.let { async { games.games(base.copy(tagIds = it, ordering = GameQuery.Ordering.POPULAR, pageSize = 40)).map { p -> p.items } } },
+            topGenres.takeIf { it.isNotEmpty() }?.let { async { games.games(base.copy(genreIds = it, ordering = GameQuery.Ordering.RATING, metacritic = WELL_REVIEWED, pageSize = 40)).map { p -> p.items } } },
+            topTags.takeIf { it.isNotEmpty() }?.let { async { games.games(base.copy(tagIds = it, ordering = GameQuery.Ordering.RATING, metacritic = WELL_REVIEWED, pageSize = 40)).map { p -> p.items } } },
         )
         val trendingCall = async {
             games.games(base.copy(ordering = GameQuery.Ordering.POPULAR, released = today.minusDays(TRENDING_DAYS)..today)).map { it.items }
@@ -94,5 +94,11 @@ class CandidateSource @Inject constructor(private val games: GameRepository) {
         const val SEED_TAGS = 2
         const val TOP_FEATURES = 3
         const val TRENDING_DAYS = 90L
+
+        /**
+         * Discovery sorts by rating within well-reviewed games, not by popularity: "most added" put the
+         * same few blockbusters at the top of every query whatever the tags. Trending stays popular on purpose.
+         */
+        val WELL_REVIEWED = 70..100
     }
 }

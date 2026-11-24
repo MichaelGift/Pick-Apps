@@ -16,7 +16,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -59,6 +61,17 @@ class ForYouViewModel @Inject constructor(
         }
     }
 
+    init {
+        // A like, "Not for me" or library change anywhere (details, checklist, the long-press sheet)
+        // re-ranks the feed. The candidate pool is reused, so this is instant and offline.
+        viewModelScope.launch {
+            combine(feedback.feedback, library.entries) { f, l -> f.map { it.game.id to it.type } to l.map { it.game.id to it.status } }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { load(forceRefresh = false) }
+        }
+    }
+
     fun setScope(scope: Platform?) {
         if (scope == _state.value.scope) return
         _state.update { it.copy(scope = scope) }
@@ -77,14 +90,12 @@ class ForYouViewModel @Inject constructor(
     fun rate(game: Game, type: FeedbackType) {
         viewModelScope.launch {
             feedback.setFeedback(game, type)
-            load(forceRefresh = false)
         }
     }
 
     fun addToLibrary(game: Game, status: LibraryStatus) {
         viewModelScope.launch {
             library.setStatus(game, status)
-            load(forceRefresh = false)
         }
     }
 

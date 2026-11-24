@@ -12,6 +12,9 @@ interface ItemTraits<T, K, F> {
     fun rating(item: T): Double
     fun votes(item: T): Int
     fun released(item: T): LocalDate?
+
+    /** How famous the item is, 0–1. Only used when [RankerWeights.fame] is set; defaults to unknown. */
+    fun popularity(item: T): Double = 0.0
 }
 
 /** An item worth ranking, and which of the user's liked "seeds" led to it. */
@@ -41,6 +44,11 @@ data class RankerWeights(
     val freshnessYears: Double = 10.0,
     /** At most this many consecutive picks may share a dominant feature. */
     val maxRun: Int = 2,
+    /**
+     * Subtracted per unit of [ItemTraits.popularity], so the most famous items don't win every tie and
+     * a feed can surface things the user hasn't already heard of. Off by default.
+     */
+    val fame: Double = 0.0,
 )
 
 /**
@@ -84,7 +92,8 @@ class Ranker<T, K, F : Comparable<F>>(
         return weights.affinity * affinity +
             weights.seed * seed +
             weights.quality * bayesianRating(item) / 10.0 +
-            weights.freshness * freshness(item, today)
+            weights.freshness * freshness(item, today) -
+            weights.fame * traits.popularity(item).coerceIn(0.0, 1.0)
     }
 
     /** Pulls averages from few votes toward [RankerWeights.priorMean], so 9.0 from 12 votes doesn't win. */

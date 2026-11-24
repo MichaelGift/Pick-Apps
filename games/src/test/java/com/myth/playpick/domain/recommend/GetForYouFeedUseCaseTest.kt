@@ -80,6 +80,34 @@ class GetForYouFeedUseCaseTest {
     }
 
     @Test
+    fun `don't show again retires the series, not for me sinks it, and editions count as one`() = runTest {
+        feedback.setFeedback(game(60, genres = listOf(rpg), name = "Cyberpunk 2077"), FeedbackType.NOT_INTERESTED)
+        feedback.setFeedback(game(70, genres = listOf(rpg), name = "The Witcher 3: Wild Hunt"), FeedbackType.DISLIKE)
+        rawg.whenQuery({ it.genreIds.isNotEmpty() }, listOf(
+            game(61, genres = listOf(rpg), name = "Cyberpunk 2077: Ultimate Edition"),
+            game(71, genres = listOf(rpg), name = "The Witcher 2: Assassins of Kings", rating = 4.9),
+            game(80, genres = listOf(rpg), name = "Disco Elysium", rating = 4.2),
+            game(81, genres = listOf(rpg), name = "Disco Elysium - The Final Cut", rating = 4.3),
+        ))
+
+        val ids = useCase()().getOrThrow().topPicks.map { it.game.id }
+
+        assertFalse(61 in ids)
+        assertEquals(1, ids.count { it == 80 || it == 81 })
+        assertEquals(71, ids.last())
+    }
+
+    @Test
+    fun `famous games lose ties to lesser-known ones`() = runTest {
+        rawg.whenQuery({ rpg in it.genreIds }, listOf(
+            game(90, genres = listOf(rpg), ratingsCount = 80_000, name = "Blockbuster"),
+            game(91, genres = listOf(rpg), ratingsCount = 900, name = "Hidden Gem"),
+        ))
+
+        assertEquals(listOf(91, 90), useCase()().getOrThrow().topPicks.map { it.game.id })
+    }
+
+    @Test
     fun `games already judged or owned are never recommended`() = runTest {
         library.setStatus(game(10, genres = listOf(rpg)), LibraryStatus.BACKLOG)
         feedback.setFeedback(game(11, genres = listOf(rpg)), FeedbackType.NOT_INTERESTED)

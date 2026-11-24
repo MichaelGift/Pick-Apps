@@ -22,6 +22,7 @@ class RankerTest {
         override fun rating(item: Item) = item.rating
         override fun votes(item: Item) = item.votes
         override fun released(item: Item) = item.released
+        override fun popularity(item: Item) = item.votes / 100_000.0
     }
 
     private val today = LocalDate.of(2026, 11, 20)
@@ -101,5 +102,14 @@ class RankerTest {
         val ranked = ranker.rank(items, p, emptySet(), today) { it.startsWith("g:") }
 
         assertEquals(listOf(1L, 2L, 4L, 3L), ranked.map { it.item.id })
+    }
+
+    @Test
+    fun `fame only counts when switched on`() {
+        val famous = Candidate<Item, Long>(Item(1, listOf("rpg"), votes = 100_000))
+        val p = profile("rpg")
+        val withFame = Ranker(Traits, RankerWeights(fame = 0.2), compareBy { it.id })
+
+        assertEquals(ranker.score(famous, p, today) - 0.2, withFame.score(famous, p, today), 1e-9)
     }
 }

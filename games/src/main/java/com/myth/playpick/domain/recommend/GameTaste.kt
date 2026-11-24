@@ -65,6 +65,9 @@ object GameTraits : ItemTraits<Game, Int, GameFeature> {
     override fun rating(item: Game) = item.rating * 2
     override fun votes(item: Game) = item.ratingsCount
     override fun released(item: Game) = item.releaseLocalDate()
+
+    /** log10 of RAWG's ratings count over 5: 100k ratings is 1.0, 1k is 0.6, 30 is 0.3. */
+    override fun popularity(item: Game) = kotlin.math.log10(item.ratingsCount + 1.0) / 5.0
 }
 
 data class TasteSnapshot(

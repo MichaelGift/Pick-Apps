@@ -9,6 +9,7 @@ import com.myth.playpick.domain.model.Named
 import com.myth.playpick.domain.model.Platform
 import com.myth.playpick.domain.repository.FeedbackRepository
 import com.myth.playpick.domain.repository.GameRepository
+import com.myth.playpick.domain.recommend.editionKey
 import com.myth.playpick.domain.repository.UserPreferencesRepository
 import com.myth.playpick.ui.common.toUserMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -105,11 +106,20 @@ class OnboardingViewModel @Inject constructor(
         val s = _state.value
         _state.update { it.copy(isLoading = true, error = null) }
         viewModelScope.launch {
-            val base = GameQuery(platforms = s.platforms, ordering = GameQuery.Ordering.POPULAR, pageSize = 24)
-            val byGenre = async { if (s.selectedGenres.isEmpty()) Result.success(emptyList()) else games.games(base.copy(genreIds = s.selectedGenres)).map { it.items } }
-            val byTag = async { if (s.selectedTags.isEmpty()) Result.success(emptyList()) else games.games(base.copy(tagIds = s.selectedTags)).map { it.items } }
-            val results = listOf(byGenre.await(), byTag.await())
-            val merged = interleave(results.map { it.getOrDefault(emptyList()) }).distinctBy { it.id }
+            // Famous games alone make famous seeds, and a feed of the same blockbusters. Mix the most
+            // popular with the best-reviewed, so lesser-known favourites are there to pick.
+            val popular = GameQuery(platforms = s.platforms, ordering = GameQuery.Ordering.POPULAR, pageSize = 16)
+            val acclaimed = GameQuery(platforms = s.platforms, ordering = GameQuery.Ordering.RATING, metacritic = 75..100, pageSize = 16)
+            fun fetch(query: GameQuery, genres: Boolean) = async {
+                val ids = if (genres) s.selectedGenres else s.selectedTags
+                if (ids.isEmpty()) Result.success(emptyList())
+                else games.games(if (genres) query.copy(genreIds = ids) else query.copy(tagIds = ids)).map { it.items }
+            }
+            val results = listOf(fetch(popular, true), fetch(acclaimed, true), fetch(popular, false), fetch(acclaimed, false)).map { it.await() }
+            val merged = interleave(results.map { it.getOrDefault(emptyList()) })
+                .distinctBy { it.id }
+                .distinctBy { it.editionKey }
+                .take(MAX_GAMES)
             _state.update {
                 it.copy(
                     games = merged,
@@ -144,5 +154,6 @@ class OnboardingViewModel @Inject constructor(
         const val MIN_TASTE = 3
         const val MIN_GAMES = 5
         const val MAX_TAGS = 24
+        const val MAX_GAMES = 36
     }
 }

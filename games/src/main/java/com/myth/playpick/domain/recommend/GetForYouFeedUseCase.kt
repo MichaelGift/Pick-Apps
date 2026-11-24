@@ -2,6 +2,7 @@ package com.myth.playpick.domain.recommend
 
 import com.myth.core.recommend.Ranked
 import com.myth.core.recommend.Ranker
+import com.myth.core.recommend.RankerWeights
 import com.myth.playpick.domain.model.FeedbackType
 import com.myth.playpick.domain.model.Game
 import com.myth.playpick.domain.model.GameFeature
@@ -38,7 +39,8 @@ class GetForYouFeedUseCase @Inject constructor(
 ) {
     private data class PoolKey(val seeds: List<Int>, val features: List<GameFeature>, val platforms: Set<Platform>)
 
-    private val ranker = Ranker(GameTraits, tieBreak = compareBy<Game> { it.id })
+    // A mild fame penalty: a blockbuster still wins on strong taste, just not every tie.
+    private val ranker = Ranker(GameTraits, RankerWeights(fame = FAME_PENALTY), tieBreak = compareBy<Game> { it.id })
     private val lock = Mutex()
     private var pool: CandidatePool? = null
     private var poolKey: PoolKey? = null
@@ -63,14 +65,23 @@ class GetForYouFeedUseCase @Inject constructor(
             scope == null || game.platforms.isEmpty() || game.platforms.any { it.id in scope.rawgIds }
         }
         val excluded = snapshot.excludedIds + seeds.map { it.id }
+        // Every edition of a game already judged, owned or loved counts as that game.
+        val judgedEditions = (snapshot.feedback.map { it.game } + snapshot.library.map { it.game } + seeds).mapTo(mutableSetOf()) { it.editionKey }
+        // "Don't show this again" retires the whole series; "Not for me" only sinks it.
+        val retiredSeries = snapshot.feedback.filter { it.type == FeedbackType.NOT_INTERESTED }.mapTo(mutableSetOf()) { it.game.franchiseKey }
+        val sunkSeries = snapshot.feedback.filter { it.type == FeedbackType.DISLIKE }.mapTo(mutableSetOf()) { it.game.franchiseKey }
         val ranked = ranker.rank(
-            candidates = candidates.candidates.filter { inScope(it.item) },
+            candidates = candidates.candidates.filter {
+                inScope(it.item) && it.item.editionKey !in judgedEditions && it.item.franchiseKey !in retiredSeries
+            },
             profile = profile,
             excluded = excluded,
             today = today,
             // Tags like "Atmospheric" are on everything; variety comes from genres.
             diversityFeature = { it.kind == GameFeature.Kind.GENRE },
         ).map { it.toPick(profile, seeds, names) }
+            .distinctBy { it.game.editionKey }
+            .let { picks -> picks.filter { it.game.franchiseKey !in sunkSeries } + picks.filter { it.game.franchiseKey in sunkSeries } }
 
         val feed = GameFeed(
             topPicks = ranked.take(TOP_PICKS),
@@ -80,7 +91,10 @@ class GetForYouFeedUseCase @Inject constructor(
                 GenreRow(Named(feature.id, name), ranked.filter { pick -> pick.game.genres.any { it.id == feature.id } }.take(ROW_SIZE))
             }.filter { it.picks.isNotEmpty() },
             shortAndSweet = ranked.filter { it.game.playtimeHours in 1..SHORT_HOURS && (it.match ?: 0) >= SHORT_MIN_MATCH }.take(ROW_SIZE),
-            trending = candidates.trending.filter { inScope(it) && it.id !in excluded }.take(ROW_SIZE),
+            trending = candidates.trending
+                .filter { inScope(it) && it.id !in excluded && it.editionKey !in judgedEditions && it.franchiseKey !in retiredSeries && it.franchiseKey !in sunkSeries }
+                .distinctBy { it.editionKey }
+                .take(ROW_SIZE),
             taste = TasteSummary(
                 genres = profile.top(TASTE_FEATURES) { it.kind == GameFeature.Kind.GENRE }.mapNotNull { f -> names[f]?.let { Weighted(it, profile.weightOf(f)) } },
                 tags = profile.top(TASTE_FEATURES) { it.kind == GameFeature.Kind.TAG }.mapNotNull { f -> names[f]?.let { Weighted(it, profile.weightOf(f)) } },
@@ -134,6 +148,7 @@ class GetForYouFeedUseCase @Inject constructor(
 
     companion object {
         const val MAX_SEEDS = 5
+        const val FAME_PENALTY = 0.12
         const val MAX_FEATURES = 6
         const val TOP_PICKS = 10
         const val SEED_ROWS = 3
